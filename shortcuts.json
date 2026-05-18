@@ -1,0 +1,21 @@
+{
+  "opacity": 0.92,
+  "geometry": "280x56+1235+601",
+  "expanded_geometry": "280x288+1235+601",
+  "collapsed_geometry": "280x56+1235+601",
+  "is_collapsed": true,
+  "shortcuts": [
+    {
+      "label": "Open Sample PDF",
+      "target": "C:\\Users\\Public\\Documents\\Sample.pdf"
+    },
+    {
+      "label": "Open YouTube",
+      "target": "https://www.youtube.com"
+    },
+    {
+      "label": "Open Downloads",
+      "target": "%USERPROFILE%\\Downloads"
+    }
+  ]
+}
