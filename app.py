@@ -612,6 +612,7 @@ class FloatingShortcutsApp:
         self.context_menu: tk.Menu | None = None
         self._save_after_id: str | None = None
         self._last_saved_state: tuple[str, float, bool] | None = None
+        self._wheel_delta_remainder = 0.0
 
         self._build_ui()
         self._build_context_menu()
@@ -621,6 +622,9 @@ class FloatingShortcutsApp:
 
         self.root.bind("<Configure>", self._on_window_configure)
         self.root.bind_all("<Button-3>", self._show_context_menu, add="+")
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.root.bind_all("<Button-4>", self._on_mousewheel_up, add="+")
+        self.root.bind_all("<Button-5>", self._on_mousewheel_down, add="+")
         self.root.bind("<Escape>", lambda _: self.root.destroy())
 
     def _build_ui(self) -> None:
@@ -742,8 +746,6 @@ class FloatingShortcutsApp:
             self._on_shortcuts_frame_configure,
         )
         self.shortcut_canvas.bind("<Configure>", self._on_canvas_configure)
-        self.shortcut_canvas.bind("<MouseWheel>", self._on_mousewheel)
-        self.shortcut_inner_frame.bind("<MouseWheel>", self._on_mousewheel)
 
     def _build_context_menu(self) -> None:
         menu = tk.Menu(self.root, tearoff=0)
@@ -776,12 +778,77 @@ class FloatingShortcutsApp:
         self.context_menu.tk_popup(event.x_root, event.y_root)
         self.context_menu.grab_release()
 
-    def _on_mousewheel(self, event: tk.Event) -> None:
-        if self.is_collapsed or self.shortcut_canvas is None:
+    def _can_scroll_shortcuts(self) -> bool:
+        if self.shortcut_canvas is None:
+            return False
+        bounds = self.shortcut_canvas.bbox("all")
+        if bounds is None:
+            return False
+        content_height = bounds[3] - bounds[1]
+        viewport_height = self.shortcut_canvas.winfo_height()
+        return content_height > viewport_height
+
+    def _event_in_shortcuts_area(self, event: tk.Event) -> bool:
+        if self.shortcut_container is None:
+            return False
+        widget = getattr(event, "widget", None)
+        while widget is not None:
+            if widget is self.shortcut_container:
+                return True
+            widget = getattr(widget, "master", None)
+        return False
+
+    def _scroll_shortcuts_by_pixels(self, pixels: float) -> None:
+        if self.shortcut_canvas is None:
             return
-        delta = int(-1 * (event.delta / 120))
-        if delta != 0:
-            self.shortcut_canvas.yview_scroll(delta, "units")
+        bounds = self.shortcut_canvas.bbox("all")
+        if bounds is None:
+            return
+        content_height = bounds[3] - bounds[1]
+        viewport_height = self.shortcut_canvas.winfo_height()
+        max_scroll = content_height - viewport_height
+        if max_scroll <= 0:
+            return
+        current_start, _ = self.shortcut_canvas.yview()
+        current_pixels = current_start * max_scroll
+        next_pixels = current_pixels + pixels
+        next_pixels = max(0.0, min(next_pixels, float(max_scroll)))
+        self.shortcut_canvas.yview_moveto(next_pixels / float(max_scroll))
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        if (
+            self.is_collapsed
+            or self.shortcut_canvas is None
+            or not self._can_scroll_shortcuts()
+            or not self._event_in_shortcuts_area(event)
+        ):
+            return
+        self._wheel_delta_remainder += -float(event.delta) / 120.0
+        whole_steps = int(self._wheel_delta_remainder)
+        if whole_steps == 0:
+            return
+        self._wheel_delta_remainder -= whole_steps
+        self._scroll_shortcuts_by_pixels(float(whole_steps) * 36.0)
+
+    def _on_mousewheel_up(self, event: tk.Event) -> None:
+        if (
+            self.is_collapsed
+            or self.shortcut_canvas is None
+            or not self._can_scroll_shortcuts()
+            or not self._event_in_shortcuts_area(event)
+        ):
+            return
+        self._scroll_shortcuts_by_pixels(-36.0)
+
+    def _on_mousewheel_down(self, event: tk.Event) -> None:
+        if (
+            self.is_collapsed
+            or self.shortcut_canvas is None
+            or not self._can_scroll_shortcuts()
+            or not self._event_in_shortcuts_area(event)
+        ):
+            return
+        self._scroll_shortcuts_by_pixels(36.0)
 
     def _on_shortcuts_frame_configure(self, _: tk.Event) -> None:
         if self.shortcut_canvas is None:
@@ -789,6 +856,9 @@ class FloatingShortcutsApp:
         self.shortcut_canvas.configure(
             scrollregion=self.shortcut_canvas.bbox("all"),
         )
+        if not self._can_scroll_shortcuts():
+            self._wheel_delta_remainder = 0.0
+            self.shortcut_canvas.yview_moveto(0)
 
     def _on_canvas_configure(self, event: tk.Event) -> None:
         if self.shortcut_canvas is None or self.shortcut_window_id is None:
@@ -1006,7 +1076,15 @@ class FloatingShortcutsApp:
             return
         self.config["shortcuts"] = dialog.result
         self._render_shortcuts()
-        self._schedule_save()
+        try:
+            save_config(self.config)
+        except OSError as exc:
+            messagebox.showerror(
+                APP_NAME,
+                f"Could not save shortcuts:\n{exc}",
+            )
+            return
+        self._last_saved_state = self._current_save_state()
 
     def _reload_config(self) -> None:
         self.config = load_config(fallback_on_error=self.config)

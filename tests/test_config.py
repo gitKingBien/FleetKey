@@ -109,6 +109,37 @@ class ConfigTests(unittest.TestCase):
             [{"label": "Keep", "target": "https://example.com"}],
         )
 
+    def test_open_shortcuts_manager_persists_changes(self) -> None:
+        class FakeDialog:
+            def __init__(self, _: object, __: list[dict[str, object]]) -> None:
+                self.window = object()
+                self.result = [
+                    {"label": "New", "target": "https://example.com/new"},
+                ]
+
+        class FakeRoot:
+            def wait_window(self, _: object) -> None:
+                return
+
+        ui = app.FloatingShortcutsApp.__new__(app.FloatingShortcutsApp)
+        ui.root = FakeRoot()
+        ui.config = {"shortcuts": [{"label": "Old", "target": "https://old"}]}
+        ui._render_shortcuts = lambda: None
+        ui._current_save_state = lambda: ("340x420+60+60", 0.92, False)
+        ui._last_saved_state = None
+
+        with (
+            patch.object(app, "ShortcutManagerDialog", FakeDialog),
+            patch.object(app, "save_config") as mock_save,
+        ):
+            ui._open_shortcuts_manager()
+
+        self.assertEqual(
+            ui.config["shortcuts"],
+            [{"label": "New", "target": "https://example.com/new"}],
+        )
+        mock_save.assert_called_once_with(ui.config)
+
 
 if __name__ == "__main__":
     unittest.main()
