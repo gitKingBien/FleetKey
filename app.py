@@ -190,23 +190,48 @@ def save_config(config: dict[str, Any]) -> None:
         temp_path.unlink(missing_ok=True)
 
 
-def load_config() -> dict[str, Any]:
-    """Load config from disk and sanitize values."""
+def load_config(
+    *,
+    fallback_on_error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Load config from disk and sanitize values.
+
+    Supports UTF-8 BOM files and optionally falls back to a caller state
+    instead of defaults when parsing fails.
+    """
     if not CONFIG_PATH.exists():
         save_config(DEFAULT_CONFIG)
         return sanitize_config(DEFAULT_CONFIG.copy())
 
     try:
-        raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        # `utf-8-sig` tolerates files saved with a UTF-8 BOM.
+        raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+    except OSError:
         messagebox.showwarning(
             APP_NAME,
             "Could not parse shortcuts.json. Loading default config.",
         )
-        return sanitize_config(DEFAULT_CONFIG.copy())
+        if fallback_on_error is None:
+            return sanitize_config(DEFAULT_CONFIG.copy())
+        return sanitize_config(fallback_on_error)
+    except json.JSONDecodeError as exc:
+        messagebox.showwarning(
+            APP_NAME,
+            (
+                "Could not parse shortcuts.json.\n"
+                f"Line {exc.lineno}, column {exc.colno}: {exc.msg}\n\n"
+                "Tip: Windows paths in JSON must escape backslashes "
+                "(example: C:\\\\Docs\\\\file.pdf)."
+            ),
+        )
+        if fallback_on_error is None:
+            return sanitize_config(DEFAULT_CONFIG.copy())
+        return sanitize_config(fallback_on_error)
 
     if not isinstance(raw, dict):
-        return sanitize_config(DEFAULT_CONFIG.copy())
+        if fallback_on_error is None:
+            return sanitize_config(DEFAULT_CONFIG.copy())
+        return sanitize_config(fallback_on_error)
     return sanitize_config(raw)
 
 
@@ -648,7 +673,7 @@ class FloatingShortcutsApp:
             )
 
     def _reload_config(self) -> None:
-        self.config = load_config()
+        self.config = load_config(fallback_on_error=self.config)
         self.is_collapsed = bool(self.config.get("is_collapsed", False))
         self.root.geometry(self.config.get("geometry", DEFAULT_GEOMETRY))
         self.root.attributes("-alpha", self.config.get("opacity", 0.92))

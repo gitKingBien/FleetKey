@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import app
 
@@ -54,6 +58,55 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             sanitized["shortcuts"],
             [{"label": "Docs", "target": "C:\\Docs"}],
+        )
+
+    def test_load_config_accepts_utf8_bom(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "shortcuts.json"
+            payload = {
+                "opacity": 0.7,
+                "geometry": "340x420+60+60",
+                "shortcuts": [{"label": "Docs", "target": "C:\\Docs"}],
+            }
+            config_path.write_text(
+                json.dumps(payload),
+                encoding="utf-8-sig",
+            )
+
+            with patch.object(app, "CONFIG_PATH", config_path):
+                loaded = app.load_config()
+
+        self.assertEqual(loaded["opacity"], 0.7)
+        self.assertEqual(
+            loaded["shortcuts"],
+            [{"label": "Docs", "target": "C:\\Docs"}],
+        )
+
+    def test_load_config_can_keep_fallback_state_on_parse_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "shortcuts.json"
+            config_path.write_text(
+                '{"shortcuts":[{"label":"Bad","target":"C:\\new\\path"}]}',
+                encoding="utf-8",
+            )
+            fallback = {
+                "opacity": 0.8,
+                "geometry": app.DEFAULT_GEOMETRY,
+                "expanded_geometry": app.DEFAULT_GEOMETRY,
+                "collapsed_geometry": app.DEFAULT_COLLAPSED_GEOMETRY,
+                "is_collapsed": False,
+                "shortcuts": [{"label": "Keep", "target": "https://example.com"}],
+            }
+
+            with (
+                patch.object(app, "CONFIG_PATH", config_path),
+                patch.object(app.messagebox, "showwarning"),
+            ):
+                loaded = app.load_config(fallback_on_error=fallback)
+
+        self.assertEqual(
+            loaded["shortcuts"],
+            [{"label": "Keep", "target": "https://example.com"}],
         )
 
 
