@@ -21,7 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 
 APP_NAME = "FleetKey"
@@ -263,6 +263,326 @@ def open_target(target: str) -> None:
     os.startfile(resolved)  # type: ignore[attr-defined]
 
 
+class ShortcutManagerDialog:
+    """Modal form editor for shortcut items."""
+
+    def __init__(self, parent: tk.Tk, shortcuts: list[dict[str, Any]]):
+        self.parent = parent
+        self.result: list[dict[str, str]] | None = None
+        self.shortcuts: list[dict[str, str]] = []
+        for item in shortcuts:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("label")
+            target = item.get("target")
+            if isinstance(label, str) and isinstance(target, str):
+                label = label.strip()
+                target = target.strip()
+                if label and target:
+                    self.shortcuts.append(
+                        {"label": label, "target": target},
+                    )
+
+        self.window = tk.Toplevel(parent)
+        self.window.title(f"{APP_NAME} - Manage Shortcuts")
+        self.window.transient(parent)
+        self.window.grab_set()
+        self.window.configure(bg=UI_COLORS["outer_bg"])
+        self.window.minsize(560, 380)
+        self.window.protocol("WM_DELETE_WINDOW", self._on_cancel)
+
+        self.label_var = tk.StringVar()
+        self.target_var = tk.StringVar()
+        self.listbox: tk.Listbox | None = None
+
+        self._build_ui()
+        self._refresh_listbox()
+        if self.shortcuts:
+            self._set_selected_index(0)
+
+    def _build_ui(self) -> None:
+        container = tk.Frame(self.window, bg=UI_COLORS["outer_bg"])
+        container.pack(fill="both", expand=True, padx=12, pady=12)
+        container.grid_columnconfigure(0, weight=1)
+
+        list_frame = tk.Frame(container, bg=UI_COLORS["outer_bg"])
+        list_frame.grid(row=0, column=0, sticky="nsew")
+        list_frame.grid_columnconfigure(0, weight=1)
+        list_frame.grid_rowconfigure(0, weight=1)
+        container.grid_rowconfigure(0, weight=1)
+
+        self.listbox = tk.Listbox(
+            list_frame,
+            activestyle="none",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            selectbackground=UI_COLORS["button_active_bg"],
+            selectforeground="white",
+            height=10,
+        )
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+        self.listbox.bind("<<ListboxSelect>>", self._on_select_shortcut)
+
+        scrollbar = tk.Scrollbar(list_frame, orient="vertical")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.listbox.configure(yscrollcommand=scrollbar.set)
+        scrollbar.configure(command=self.listbox.yview)
+
+        form_frame = tk.Frame(container, bg=UI_COLORS["outer_bg"])
+        form_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        form_frame.grid_columnconfigure(1, weight=1)
+
+        tk.Label(
+            form_frame,
+            text="Label",
+            bg=UI_COLORS["outer_bg"],
+            fg=UI_COLORS["text"],
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+        tk.Entry(
+            form_frame,
+            textvariable=self.label_var,
+            bg="white",
+            fg="black",
+        ).grid(row=0, column=1, sticky="ew", pady=(0, 6))
+
+        tk.Label(
+            form_frame,
+            text="Target (URL or path)",
+            bg=UI_COLORS["outer_bg"],
+            fg=UI_COLORS["text"],
+            anchor="w",
+        ).grid(row=1, column=0, sticky="w", padx=(0, 8))
+        tk.Entry(
+            form_frame,
+            textvariable=self.target_var,
+            bg="white",
+            fg="black",
+        ).grid(row=1, column=1, sticky="ew")
+
+        browse_frame = tk.Frame(container, bg=UI_COLORS["outer_bg"])
+        browse_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        tk.Button(
+            browse_frame,
+            text="Browse File",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=self._browse_file,
+        ).pack(side="left")
+        tk.Button(
+            browse_frame,
+            text="Browse Folder",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=self._browse_folder,
+        ).pack(side="left", padx=(8, 0))
+
+        action_frame = tk.Frame(container, bg=UI_COLORS["outer_bg"])
+        action_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        tk.Button(
+            action_frame,
+            text="Add / Update",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=self._add_or_update_shortcut,
+        ).pack(side="left")
+        tk.Button(
+            action_frame,
+            text="Remove",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=self._remove_selected_shortcut,
+        ).pack(side="left", padx=(8, 0))
+        tk.Button(
+            action_frame,
+            text="Move Up",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=lambda: self._move_selected(-1),
+        ).pack(side="left", padx=(8, 0))
+        tk.Button(
+            action_frame,
+            text="Move Down",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=lambda: self._move_selected(1),
+        ).pack(side="left", padx=(8, 0))
+        tk.Button(
+            action_frame,
+            text="Clear",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=self._clear_fields,
+        ).pack(side="left", padx=(8, 0))
+
+        footer = tk.Frame(container, bg=UI_COLORS["outer_bg"])
+        footer.grid(row=4, column=0, sticky="e", pady=(14, 0))
+        tk.Button(
+            footer,
+            text="Save",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=self._on_save,
+            width=10,
+        ).pack(side="left")
+        tk.Button(
+            footer,
+            text="Cancel",
+            bg=UI_COLORS["button_bg"],
+            fg="white",
+            activebackground=UI_COLORS["button_active_bg"],
+            relief="flat",
+            command=self._on_cancel,
+            width=10,
+        ).pack(side="left", padx=(8, 0))
+
+    def _format_shortcut_row(self, item: dict[str, str]) -> str:
+        return f'{item["label"]}  ->  {item["target"]}'
+
+    def _selected_index(self) -> int | None:
+        if self.listbox is None:
+            return None
+        selected = self.listbox.curselection()
+        if not selected:
+            return None
+        return int(selected[0])
+
+    def _set_selected_index(self, index: int) -> None:
+        if self.listbox is None:
+            return
+        if index < 0 or index >= len(self.shortcuts):
+            return
+        self.listbox.selection_clear(0, "end")
+        self.listbox.selection_set(index)
+        self.listbox.activate(index)
+        self.listbox.see(index)
+        self._sync_fields_from_selection()
+
+    def _refresh_listbox(self) -> None:
+        if self.listbox is None:
+            return
+        self.listbox.delete(0, "end")
+        for item in self.shortcuts:
+            self.listbox.insert("end", self._format_shortcut_row(item))
+
+    def _sync_fields_from_selection(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            return
+        item = self.shortcuts[index]
+        self.label_var.set(item["label"])
+        self.target_var.set(item["target"])
+
+    def _on_select_shortcut(self, _: tk.Event) -> None:
+        self._sync_fields_from_selection()
+
+    def _clear_fields(self) -> None:
+        if self.listbox is not None:
+            self.listbox.selection_clear(0, "end")
+        self.label_var.set("")
+        self.target_var.set("")
+
+    def _read_shortcut_fields(self) -> tuple[str, str] | None:
+        label = self.label_var.get().strip()
+        target = self.target_var.get().strip()
+        if not label:
+            messagebox.showwarning(APP_NAME, "Label is required.")
+            return None
+        if not target:
+            messagebox.showwarning(APP_NAME, "Target is required.")
+            return None
+        if target.startswith(("http://", "https://")) and not is_http_url(
+            target,
+        ):
+            messagebox.showwarning(
+                APP_NAME,
+                "Enter a valid URL (example: https://example.com).",
+            )
+            return None
+        return (label, target)
+
+    def _add_or_update_shortcut(self) -> None:
+        shortcut = self._read_shortcut_fields()
+        if shortcut is None:
+            return
+        label, target = shortcut
+        item = {"label": label, "target": target}
+        index = self._selected_index()
+        if index is None:
+            self.shortcuts.append(item)
+            self._refresh_listbox()
+            self._set_selected_index(len(self.shortcuts) - 1)
+            return
+        self.shortcuts[index] = item
+        self._refresh_listbox()
+        self._set_selected_index(index)
+
+    def _remove_selected_shortcut(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            messagebox.showwarning(APP_NAME, "Select a shortcut to remove.")
+            return
+        self.shortcuts.pop(index)
+        self._refresh_listbox()
+        if not self.shortcuts:
+            self._clear_fields()
+            return
+        next_index = min(index, len(self.shortcuts) - 1)
+        self._set_selected_index(next_index)
+
+    def _move_selected(self, direction: int) -> None:
+        index = self._selected_index()
+        if index is None:
+            messagebox.showwarning(
+                APP_NAME,
+                "Select a shortcut to move.",
+            )
+            return
+        new_index = index + direction
+        if new_index < 0 or new_index >= len(self.shortcuts):
+            return
+        self.shortcuts[index], self.shortcuts[new_index] = (
+            self.shortcuts[new_index],
+            self.shortcuts[index],
+        )
+        self._refresh_listbox()
+        self._set_selected_index(new_index)
+
+    def _browse_file(self) -> None:
+        path = filedialog.askopenfilename(parent=self.window)
+        if path:
+            self.target_var.set(path)
+
+    def _browse_folder(self) -> None:
+        path = filedialog.askdirectory(parent=self.window)
+        if path:
+            self.target_var.set(path)
+
+    def _on_save(self) -> None:
+        self.result = [item.copy() for item in self.shortcuts]
+        self.window.destroy()
+
+    def _on_cancel(self) -> None:
+        self.result = None
+        self.window.destroy()
+
+
 class FloatingShortcutsApp:
     """Main Tkinter application for FleetKey."""
 
@@ -429,7 +749,11 @@ class FloatingShortcutsApp:
         menu = tk.Menu(self.root, tearoff=0)
         menu.add_command(label="Reload Shortcuts", command=self._reload_config)
         menu.add_command(
-            label="Edit JSON",
+            label="Manage Shortcuts",
+            command=self._open_shortcuts_manager,
+        )
+        menu.add_command(
+            label="Edit JSON (Advanced)",
             command=self._open_config_in_editor,
         )
         menu.add_separator()
@@ -485,7 +809,7 @@ class FloatingShortcutsApp:
         if not shortcuts:
             tk.Label(
                 self.shortcut_inner_frame,
-                text="No shortcuts yet.\nRight-click to edit JSON.",
+                text="No shortcuts yet.\nRight-click to manage shortcuts.",
                 justify="center",
                 fg=UI_COLORS["text"],
                 bg=UI_COLORS["outer_bg"],
@@ -671,6 +995,18 @@ class FloatingShortcutsApp:
                 APP_NAME,
                 f"Could not open config file:\n{exc}",
             )
+
+    def _open_shortcuts_manager(self) -> None:
+        shortcuts = self.config.get("shortcuts", [])
+        if not isinstance(shortcuts, list):
+            shortcuts = []
+        dialog = ShortcutManagerDialog(self.root, shortcuts)
+        self.root.wait_window(dialog.window)
+        if dialog.result is None:
+            return
+        self.config["shortcuts"] = dialog.result
+        self._render_shortcuts()
+        self._schedule_save()
 
     def _reload_config(self) -> None:
         self.config = load_config(fallback_on_error=self.config)

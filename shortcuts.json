@@ -1,9 +1,9 @@
 {
-  "opacity": 0.92,
-  "geometry": "280x56+1235+601",
-  "expanded_geometry": "280x288+1235+601",
-  "collapsed_geometry": "280x56+1235+601",
-  "is_collapsed": true,
+  "opacity": 0.86,
+  "geometry": "280x288+892+458",
+  "expanded_geometry": "280x288+892+458",
+  "collapsed_geometry": "280x56+892+458",
+  "is_collapsed": false,
   "shortcuts": [
     {
       "label": "Open Sample PDF",

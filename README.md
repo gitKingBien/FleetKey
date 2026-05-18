@@ -14,7 +14,8 @@ A lightweight always-on-top launcher for important files, folders, and websites.
   - local file (example: PDF)
   - folder
   - URL (`https://...`)
-- Quick config editing via `shortcuts.json`
+- Built-in form editor via `Manage Shortcuts`
+- Optional advanced editing via `shortcuts.json`
 
 ## Security-First Design
 
@@ -83,7 +84,9 @@ If someone downloads from GitHub as ZIP:
 
 ## Configure Shortcuts
 
-Edit `shortcuts.json`:
+Recommended: right-click the app and choose `Manage Shortcuts`.
+
+Advanced/manual option: edit `shortcuts.json`:
 
 ```json
 {
@@ -97,7 +100,7 @@ Edit `shortcuts.json`:
 }
 ```
 
-Then click `Reload List` in the app.
+Then click `Reload Shortcuts` in the app.
 
 ## Simple Product Requirements (Suggested)
 
